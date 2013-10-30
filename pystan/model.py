@@ -244,7 +244,11 @@ class StanModel:
             s = template.safe_substitute(model_cppname=self.model_cppname)
             outfile.write(s)
 
-        extra_compile_args = ['-O3', '-ftemplate-depth-256']
+        extra_compile_args = ['-O3', '-ftemplate-depth-256', '-Wall',
+                              '-pedantic', '-Wconversion']
+        if sys.platform.startswith('darwin'):
+            extra_compile_args += ['-arch x86_64', '-stdlib=libstdc++', '-mtune=native']
+
         extension = Extension(name=module_name,
                               language="c++",
                               sources=[pyx_file],

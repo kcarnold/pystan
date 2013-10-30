@@ -86,6 +86,7 @@ import distutils.core
 from distutils.errors import CCompilerError, DistutilsError
 from distutils.core import setup
 from distutils.extension import Extension
+import sys
 
 from Cython.Build import cythonize
 from numpy.distutils.command import install, install_clib
@@ -107,7 +108,10 @@ libstan_sources = [
     "pystan/stan/src/stan/agrad/matrix.cpp"
 ]
 
-extra_compile_args = ['-O3', '-ftemplate-depth-256']
+extra_compile_args = ['-O3', '-ftemplate-depth-256', '-Wall', '-pedantic',
+                      '-Wconversion']
+if sys.platform.startswith('darwin'):
+    extra_compile_args += ['-arch x86_64', '-stdlib=libstdc++', '-mtune=native']
 
 libstan = ('stan', {'sources': libstan_sources,
                     'include_dirs': stan_include_dirs,
