@@ -17,6 +17,7 @@ import importlib
 import imp
 import io
 import logging
+import multiprocessing
 from numbers import Number
 import os
 import random
@@ -470,7 +471,7 @@ class StanModel:
     def sampling(self, data=None, pars=None, chains=4, iter=2000,
                  warmup=None, thin=1, seed=None, init='random',
                  sample_file=None, diagnostic_file=None, verbose=False,
-                 algorithm=None, control=None, **kwargs):
+                 algorithm=None, control=None, n_jobs=1, **kwargs):
         """Draw samples from the model.
 
         Parameters
@@ -564,6 +565,11 @@ class StanModel:
 
             - `max_treedepth` : int, positive
 
+        n_jobs : int, 1 by default
+            Sample in parallel. If -1 all CPUs are used. If 1 is given, no
+            parallel computing code is used at all, which is useful for
+            debugging.
+
         Returns
         -------
         fit : StanFit4<model_name>
@@ -646,24 +652,20 @@ class StanModel:
         n_kept = 1 + (iter - warmup - 1) // thin
         n_save = n_kept + warmup2
 
-        samples, rets = [], []  # samples and return values
-        if kwargs.get('test_grad') is None:
-            mode = "SAMPLING"
+        if n_jobs is None or n_jobs == -1:
+            processes = None
         else:
-            mode = "TESTING GRADIENT"
-        # FIXME: use concurrent.futures to parallelize this
-        for i in range(chains):
-            if kwargs.get('refresh') is None or kwargs.get('refresh') > 0:
-                chain_num = i + 1
-                msg = "{} FOR MODEL {} NOW (CHAIN {})."
-                logger.info(msg.format(mode, self.model_name, chain_num))
-            ret, samples_i = fit._call_sampler(args_list[i])
-            samples.append(samples_i)
-            # call_sampler in stan_fit.hpp will raise a std::runtime_error
-            # if the return value is non-zero. Cython will generate a
-            # RuntimeError from this.
-            # FIXME: should one mimic rstan and "return" an empty StanFit?
-            # That is, should I wipe fit's attributes and return that?
+            processes = n_jobs
+        assert len(args_list) == chains
+        call_sampler = self.module._call_sampler_parallel
+        if processes > 1:
+            data_and_args = [(data_r, data_i, args) for args in args_list]
+            pool = multiprocessing.Pool(processes=processes)
+            ret_and_samples = pool.map(call_sampler, data_and_args)
+        else:
+            # avoid making unnecessary copies of data_r and data_i
+            ret_and_samples = [call_sampler((data_r, data_i, args)) for args in args_list]
+        samples = [smpl for _, smpl in ret_and_samples]
 
         inits_used = pystan.misc._organize_inits([s['inits'] for s in samples],
                                                  m_pars, p_dims)

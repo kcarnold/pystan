@@ -40,6 +40,9 @@ import pystan.plots
 from pystan._compat import PY2, string_types
 from pystan.constants import sampling_algo_t, optim_algo_t, sampling_metric_t, stan_args_method_t
 
+logger = logging.getLogger('pystan')
+logger.setLevel(logging.INFO)
+
 cdef extern from "boost/random/additive_combine.hpp" namespace "boost::random":
     cdef cppclass additive_combine_engine[T, U]:
         pass
@@ -244,6 +247,43 @@ cdef vars_i_t _dict_to_vars_i(dict data_i):
         val = (data_i[key].T.flat, data_i[key].shape)
         vars_i[key] = val
     return vars_i
+
+def _call_sampler_parallel(data_and_args):
+    data_r, data_i, args = data_and_args
+    cdef PyStanHolder *holderptr = new PyStanHolder()
+    cdef PyStanArgs *argsptr = new PyStanArgs()
+    if not holderptr:
+        raise MemoryError("Couldn't allocate space for PyStanHolder.")
+    if not argsptr:
+        raise MemoryError("Couldn't allocate space for PyStanArgs.")
+    if args['method'] == stan_args_method_t.TEST_GRADIENT:
+        mode = "TESTING GRADIENT"
+        refresh = args['ctrl']['optim']['refresh']
+    else:
+        mode = "SAMPLING"
+        refresh = args['ctrl']['sampling']['refresh']
+    chain_id = args['chain_id']
+    if refresh > 0:
+        msg = "{} NOW (CHAIN {})."
+        logger.info(msg.format(mode, chain_id))
+    _set_pystanargs_from_dict(argsptr, args)
+
+    cdef stan_fit[$model_cppname, ecuyer1988] *fitptr
+    cdef vars_r_t vars_r = _dict_to_vars_r(data_r)
+    cdef vars_i_t vars_i = _dict_to_vars_i(data_i)
+    fitptr = new stan_fit[$model_cppname, ecuyer1988](vars_r, vars_i)
+    if not fitptr:
+        raise MemoryError("Couldn't allocate space for stan_fit.")
+    ret = fitptr.call_sampler(deref(argsptr), deref(holderptr))
+    holder_dict = _dict_from_pystanholder(holderptr)
+    # FIXME: rather than fetching the args from the holderptr, we just use
+    # the argsptr we passed directly. This is a hack to solve a problem
+    # that holder.args gets dropped somewhere in C++.
+    holder_dict['args'] = _dict_from_pystanargs(argsptr)
+    del holderptr
+    del argsptr
+    del fitptr
+    return ret, holder_dict
 
 
 cdef class StanFit4$model_cppname:
