@@ -72,7 +72,10 @@ def initfun(chain_id=0):
                 tau=np.random.exponential(chain_id + 1))
 
 print("stan with init=initfun")
-ss5 = stan(fit=ss, data=dat, init=initfun)
+try:
+    ss5 = stan(fit=ss, data=dat, init=initfun)
+except RuntimeError as e:
+    assert 'eta missing' in str(e)
 
 # NOTE: does PyStan 0-index the chain ids?
 inits = [initfun(i) for i in range(4)]
